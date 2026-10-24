@@ -1,0 +1,31 @@
+{
+	"name": "pi-bg-run",
+	"version": "0.1.0",
+	"description": "Runs the model's shell commands as detached background tasks (Windows and POSIX) and wakes the agent when they finish",
+	"keywords": ["pi-package", "pi", "pi-extension"],
+	"license": "MIT",
+	"author": "Refueled",
+	"homepage": "https://github.com/Refueled/pi-bg-run#readme",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/Refueled/pi-bg-run.git"
+	},
+	"bugs": {
+		"url": "https://github.com/Refueled/pi-bg-run/issues"
+	},
+	"type": "module",
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"pi": {
+		"extensions": ["./src/index.ts"]
+	},
+	"files": ["index.ts", "src", "README.md", "PLAN.md"],
+	"scripts": {
+		"test": "node --test test/*.test.ts"
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*",
+		"typebox": "*"
+	}
+}
