@@ -187,8 +187,10 @@ Gate on `HERDR_ENV=1` and `herdr` on PATH; silently fall back to layer 1.
   `herdr pane read` for the tail, then **closes the pane/tab** whatever the
   outcome — the log and the completion message hold the output, and keeping
   failed tabs open (the original policy) piled them up until agents closed
-  them by hand. `keepOpen` leaves a failed one open instead, renamed via
-  `herdr pane report-metadata --title ...` so it is clearly the failed task.
+  them by hand. `keepOpen` leaves a failed one open instead, marked in both
+  places it can be seen: the pane title via `herdr pane report-metadata --title`,
+  and the tab strip's label via `herdr tab rename`, which is otherwise left at
+  the task's own label and would still read as a live task.
 - The same completion message is sent either way. If the user closes the tab
   manually mid-run, `process-info`/`wait-output` failure marks the task
   `orphaned` and reports it.

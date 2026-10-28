@@ -102,7 +102,7 @@ export default function (pi: ExtensionAPI): void {
 			"when you have other work to do, or nothing to do until it ends. " +
 			`The command runs in the same shell as \`bash\`; ${COMPLETION_TEXT} ` +
 			"Inside Herdr the task runs visibly in a tab (or a split with `herdr: \"pane\"`); " +
-			"the tab closes when the task ends, so nothing is left open; `keepOpen: true` keeps a failed one open, renamed, for inspection. " +
+			"the tab closes when the task ends, so nothing is left open; `keepOpen: true` keeps a failed one open, relabelled in the tab strip, for inspection. " +
 			"`timeoutSeconds` bounds the task: at the deadline its process tree is killed and the state becomes " +
 			"killed (timed out). Write long output to a file in the command if a log artifact is wanted; " +
 			"`bg_output` reads the captured output regardless.",
@@ -122,7 +122,7 @@ export default function (pi: ExtensionAPI): void {
 			),
 			keepOpen: Type.Optional(
 				Type.Boolean({
-					description: "Keep the Herdr tab or pane open, renamed, when the task ends unsuccessfully; it always closes on success",
+					description: "Keep the Herdr tab or pane open when the task ends unsuccessfully, relabelled `bg-N failed: …` in the tab strip; it always closes on success",
 				}),
 			),
 		}),

@@ -53,7 +53,7 @@ export type Task = {
 	notified: boolean;
 	/** Set when the task runs in a Herdr tab or split instead of detached. */
 	herdr?: HerdrTask;
-	/** Keep the Herdr tab or pane open, renamed, when the task ends unsuccessfully. */
+	/** Keep the Herdr tab or pane open, relabelled as the failed task, when it ends unsuccessfully. */
 	keepOpen?: boolean;
 };
 
@@ -113,7 +113,7 @@ export type StartOptions = {
 	cwd?: string;
 	timeoutSeconds?: number;
 	label?: string;
-	/** Keep the task's Herdr tab or pane open, renamed, when it ends unsuccessfully. */
+	/** Keep the task's Herdr tab or pane open, relabelled as the failed task, when it ends unsuccessfully. */
 	keepOpen?: boolean;
 	/** The shell Pi's own bash uses, when it reports one. */
 	shell?: string;
@@ -235,11 +235,18 @@ function settle(task: Task, state: TaskState, exitCode?: number): void {
 		// The tab has shown all it can once the task ends: the log and the
 		// completion message hold its output, so the tab closes on any outcome
 		// and nothing is left open to clean up. `keepOpen` is the one exception:
-		// a failed tab stays, renamed, when the caller wants it on screen.
+		// a failed tab stays when the caller wants it on screen. It is marked in
+		// both places a kept-open tab can be seen — the pane's title, and the tab
+		// strip's label, which is what it was created with and would otherwise
+		// still read as a live task. A split has no tab of its own; its pane title
+		// is the only marker.
 		const succeeded = state === "exited" && exitCode === 0;
 		try {
-			if (task.keepOpen === true && !succeeded) herdrPort().rename(task.herdr.paneId, `${task.id} failed: ${stateText(task)}`);
-			else herdrPort().close(task.herdr);
+			if (task.keepOpen === true && !succeeded) {
+				const title = `${task.id} failed: ${stateText(task)}`;
+				herdrPort().rename(task.herdr.paneId, title);
+				if (task.herdr.tabId !== undefined) herdrPort().renameTab(task.herdr.tabId, title);
+			} else herdrPort().close(task.herdr);
 		} catch {
 			// presentation only; the task is settled either way
 		}

@@ -1,6 +1,6 @@
 // The Herdr layer against a fake Herdr port: the typed line's quoting, the
 // pane wrapper's tee, and the tab lifecycle — any end closes the tab,
-// `keepOpen` keeps a failed one renamed, kill closes it, and a Herdr failure
+// `keepOpen` keeps a failed one, relabelled, kill closes it, and a Herdr failure
 // falls back to detached.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -65,6 +65,9 @@ const fakeHerdr: HerdrPort = {
 	},
 	rename: (paneId, title) => {
 		herdrCalls.push({ op: "rename", args: [paneId, title] });
+	},
+	renameTab: (tabId, label) => {
+		herdrCalls.push({ op: "renameTab", args: [tabId, label] });
 	},
 };
 setHerdrPort(fakeHerdr);
@@ -131,7 +134,7 @@ test("a tab task runs in Herdr and never spawns detached", async () => {
 	assert.deepEqual(created?.args, ["demo", process.cwd()]);
 });
 
-test("a tab task closes its tab on any outcome; keepOpen keeps a failed one renamed", async () => {
+test("a tab task closes its tab on any outcome; keepOpen keeps a failed one relabelled", async () => {
 	const ok = await startTask({ command: "true", herdr: "tab" });
 	writeFileSync(ok.logPath, `\n__BG_EXIT__:${ok.nonce}:0\n`);
 	pollOnce();
@@ -149,7 +152,7 @@ test("a tab task closes its tab on any outcome; keepOpen keeps a failed one rena
 	assert.ok(herdrCalls.some((call) => call.op === "close" && call.args[0] === bad.herdr?.paneId));
 	assert.ok(!herdrCalls.some((call) => call.op === "rename" && call.args[0] === bad.herdr?.paneId));
 
-	// `keepOpen` is the exception: a failed tab stays, renamed to be found.
+	// `keepOpen` is the exception: a failed tab stays, marked to be found.
 	const kept = await startTask({ command: "false", herdr: "tab", keepOpen: true });
 	writeFileSync(kept.logPath, `\n__BG_EXIT__:${kept.nonce}:1\n`);
 	pollOnce();
@@ -158,6 +161,11 @@ test("a tab task closes its tab on any outcome; keepOpen keeps a failed one rena
 	assert.ok(renamed !== undefined);
 	assert.ok(renamed.args[1].includes("bg-"));
 	assert.ok(renamed.args[1].includes("exited (code 1)"));
+	// The pane title alone still reads as a live task in the tab strip, so the
+	// tab is relabelled with the same text.
+	const relabelled = herdrCalls.find((call) => call.op === "renameTab" && call.args[0] === kept.herdr?.tabId);
+	assert.ok(relabelled !== undefined);
+	assert.equal(relabelled.args[1], renamed.args[1]);
 
 	// keepOpen never keeps a successful tab.
 	const keptOk = await startTask({ command: "true", herdr: "tab", keepOpen: true });
@@ -180,6 +188,16 @@ test("a split task closes its pane on success", async () => {
 	writeFileSync(task.logPath, `\n__BG_EXIT__:${task.nonce}:0\n`);
 	pollOnce();
 	assert.ok(herdrCalls.some((call) => call.op === "close" && call.args[1] === "" && call.args[0] === task.herdr?.paneId));
+});
+
+test("a kept-open split is marked at its pane only: it has no tab of its own", async () => {
+	const relabelsBefore = herdrCalls.filter((call) => call.op === "renameTab").length;
+	const task = await startTask({ command: "false", herdr: "pane", keepOpen: true });
+	writeFileSync(task.logPath, `\n__BG_EXIT__:${task.nonce}:1\n`);
+	pollOnce();
+	assert.ok(!herdrCalls.some((call) => call.op === "close" && call.args[0] === task.herdr?.paneId));
+	assert.ok(herdrCalls.some((call) => call.op === "rename" && call.args[0] === task.herdr?.paneId));
+	assert.equal(herdrCalls.filter((call) => call.op === "renameTab").length, relabelsBefore);
 });
 
 test("a Herdr failure falls back to a detached task", async () => {

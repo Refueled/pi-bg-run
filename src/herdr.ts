@@ -2,8 +2,8 @@
 // of detached. The typed line invokes the same wrapper script, whose output is
 // teed to the task's log, so `bg_output` and the completion message work the
 // same as detached mode. A tab closes when its task ends — the log and the
-// completion message hold its output — with `keepOpen` keeping a failed one,
-// renamed, on screen. Closing a tab tears down its terminal and kills the
+// completion message hold its output — with `keepOpen` keeping a failed one on
+// screen, relabelled in the tab strip and retitled at the pane. Closing a tab tears down its terminal and kills the
 // process tree (verified), so it is also the kill for a tab task; `taskkill`
 // stays the fallback when the CLI cannot be reached.
 //
@@ -38,6 +38,8 @@ export type HerdrPort = {
 	close(target: HerdrTask): void;
 	/** Rename a pane's title; best-effort, for a failed task kept on screen. */
 	rename(paneId: string, title: string): void;
+	/** Relabel a tab in the tab strip; the pane title is separate, so a kept-open tab needs both. */
+	renameTab(tabId: string, label: string): void;
 };
 
 /** Run `herdr` and parse its JSON response; `undefined` on any failure. */
@@ -180,6 +182,11 @@ export const realHerdrPort: HerdrPort = {
 	},
 	rename(paneId: string, title: string): void {
 		herdrOk(["pane", "report-metadata", paneId, "--source", "pi-bg-run", "--title", title]);
+	},
+	renameTab(tabId: string, label: string): void {
+		// `herdr tab rename` takes the label as trailing words; one argv entry
+		// keeps the spaces, since the CLI joins its variadic LABEL.
+		herdrOk(["tab", "rename", tabId, label]);
 	},
 };
 

@@ -76,7 +76,8 @@ exactly as in detached mode. The lifecycle:
 - the tab **closes itself when the task ends**, whatever the outcome: the
   output lives on in the log and the completion message, so nothing piles up;
 - `keepOpen: true` is the one exception: a task that **fails keeps its tab**,
-  with the pane renamed to `bg-N failed: exited (code 1)` for inspection;
+  relabelled in the tab strip and at the pane to `bg-N failed: exited (code 1)`
+  for inspection;
 - `bg_kill`, a timeout, or session shutdown **closes the tab**, which tears
   down its terminal and kills the process tree (verified; `taskkill` is the
   fallback). The log keeps the output either way.

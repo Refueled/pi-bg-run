@@ -61,6 +61,7 @@ const noHerdr: HerdrPort = {
 	},
 	close: () => undefined,
 	rename: () => undefined,
+	renameTab: () => undefined,
 };
 setHerdrPort(noHerdr);
 
