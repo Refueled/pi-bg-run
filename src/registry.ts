@@ -53,6 +53,8 @@ export type Task = {
 	notified: boolean;
 	/** Set when the task runs in a Herdr tab or split instead of detached. */
 	herdr?: HerdrTask;
+	/** Keep the Herdr tab or pane open, renamed, when the task ends unsuccessfully. */
+	keepOpen?: boolean;
 };
 
 type Registry = {
@@ -76,10 +78,18 @@ export function getRegistry(): Registry {
 
 /**
  * Refresh the session this runtime works for (each `/reload` calls it again).
- * Starts the poller once and removes logs a past session left behind.
+ * A different session is a different conversation: its tasks are not this
+ * one's to list or manage, so they are killed and forgotten and the ids start
+ * over at `bg-1`. The same session keeps its tasks. Starts the poller once and
+ * removes logs a past session left behind.
  */
 export function attach(pi: PiLike, sessionId: string, cwd: string): void {
 	const registry = getRegistry();
+	if (registry.sessionId !== undefined && registry.sessionId !== sessionId) {
+		for (const task of registry.tasks.values()) killTask(task, "killed by user", false);
+		registry.tasks.clear();
+		registry.nextId = 1;
+	}
 	registry.pi = pi;
 	registry.sessionId = sessionId;
 	registry.cwd = cwd;
@@ -103,6 +113,8 @@ export type StartOptions = {
 	cwd?: string;
 	timeoutSeconds?: number;
 	label?: string;
+	/** Keep the task's Herdr tab or pane open, renamed, when it ends unsuccessfully. */
+	keepOpen?: boolean;
 	/** The shell Pi's own bash uses, when it reports one. */
 	shell?: string;
 	/** Run in a Herdr tab or split; `none` detached. Defaults to `tab` inside Herdr. */
@@ -119,8 +131,8 @@ export async function startTask(options: StartOptions): Promise<Task> {
 	const sessionId = registry.sessionId ?? "no-session";
 	const dir = sessionLogDir(sessionId);
 
-	// Ids restart at bg-1 in each Pi process: skip any id whose log is already
-	// there from an earlier run, so its output is never overwritten.
+	// Ids start at bg-1 in each session: skip any id whose log is already there
+	// from an earlier run of the same session, so its output is never overwritten.
 	let id = "";
 	let logPath = "";
 	do {
@@ -135,6 +147,7 @@ export async function startTask(options: StartOptions): Promise<Task> {
 		id,
 		command,
 		...(options.label === undefined ? {} : { label: options.label }),
+		...(options.keepOpen === undefined ? {} : { keepOpen: options.keepOpen }),
 		cwd,
 		logPath,
 		scriptPath,
@@ -219,11 +232,14 @@ function settle(task: Task, state: TaskState, exitCode?: number): void {
 	if (exitCode !== undefined) task.exitCode = exitCode;
 	task.endedAt = Date.now();
 	if (task.herdr !== undefined) {
-		// A tab whose task succeeded closes itself. A failed one stays, renamed,
-		// for the user to inspect; the log holds its output either way.
+		// The tab has shown all it can once the task ends: the log and the
+		// completion message hold its output, so the tab closes on any outcome
+		// and nothing is left open to clean up. `keepOpen` is the one exception:
+		// a failed tab stays, renamed, when the caller wants it on screen.
+		const succeeded = state === "exited" && exitCode === 0;
 		try {
-			if (state === "exited" && exitCode === 0) herdrPort().close(task.herdr);
-			else herdrPort().rename(task.herdr.paneId, `${task.id} failed: ${stateText(task)}`);
+			if (task.keepOpen === true && !succeeded) herdrPort().rename(task.herdr.paneId, `${task.id} failed: ${stateText(task)}`);
+			else herdrPort().close(task.herdr);
 		} catch {
 			// presentation only; the task is settled either way
 		}

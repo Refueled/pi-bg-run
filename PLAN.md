@@ -18,7 +18,33 @@ Progress notes:
 - Installed globally at `~/.pi/agent/extensions/pi-bg-run/`; loads through
   extension discovery (verified headless). `/reload` activates it in a running
   session.
-- Ids restart at `bg-1` per Pi process and skip ids whose log already exists.
+- Ids restart at `bg-1` per session and skip ids whose log already exists.
+- **Post-pilot updates (after live use):** (1) the close-on-success tab policy
+  piled up failed tabs and agents closed them by hand — a tab now closes on
+  **any** end, with `keepOpen` opting back into keeping a failed one renamed;
+  (2) the task list grew across conversations (the registry is per Pi process)
+  — a session change now kills and forgets the old session's tasks (ids and
+  `bg_tasks` start fresh), and `bg_tasks` lists at most `limit` (default 15),
+  running first, then the most recent.
+- **Cache warming mode (2026-10-25):** while a task runs, the extension
+  overrides pi's `cache_warming_decision` to `warm`, keeping the prompt cache
+  alive through pi's native silent refresh (one-token replay at 90% of the
+  cache TTL, never in model context, usage-only in session totals). A footer
+  status line is the heartbeat (`PI_BG_RUN_HEARTBEAT_S`, default 100 s).
+  Requires the global `cacheWarming: "idle"` setting and a `promptCache`
+  lifetime on the model (pi's own economics assume a 15% idle-continuation
+  chance and otherwise decline exactly when an agent waits on a task); both
+  gaps are diagnosed in the status line and one warning per session. Pi's
+  30-minute idle horizon bounds waits longer than that. Model-facing
+  heartbeat turns were rejected: each is a full priced turn that appends two
+  messages to the transcript to do what one silent replay already does.
+  Install-time setup: the package `postinstall`
+  (`scripts/ensure-cache-warming.cjs`) sets `cacheWarming: "idle"` in
+  `<agent-dir>/settings.json` at `pi install`/`pi update` — asking on an
+  interactive terminal, silent under pi's piped stdio (verified: pi's git
+  install runs `npm install` in the checkout without `--ignore-scripts`, and
+  the root `postinstall` fires), respecting an explicit `"off"`, with
+  `PI_BG_RUN_SETUP=off|auto|prompt` to force a behavior.
 
 ## 1. Request understanding
 
@@ -99,17 +125,19 @@ visibility mode.
 
 ### Layer 1 — detached task runner (core, works outside Herdr too)
 - **Tool surface** (separate tools; do not replace `bash`):
-  - `bg_run(command, cwd?, timeoutSeconds?, label?, herdr?) -> { task_id,
-    log_path }` — returns immediately. `herdr: "pane" | "tab"` opts into
-    layer 2; default from a setting when `HERDR_ENV=1`.
+  - `bg_run(command, cwd?, timeoutSeconds?, label?, herdr?, keepOpen?) -> {
+    task_id, log_path }` — returns immediately. `herdr: "pane" | "tab"` opts
+    into layer 2; default from a setting when `HERDR_ENV=1`. `keepOpen` keeps
+    a failed Herdr tab on screen instead of closing it.
   - `bg_output(task_id, latest?, filter?)` — read the log incrementally from
     where the last read stopped, or only the newest tail with `latest: true`,
     optionally filtered by a regex. Read-only and cheap: the **inspection
     surface for an agent that stays awake and pokes at running tasks** (e.g.
     while subagent workers run). Works identically for Herdr-mode tasks (see
     layer 2: output is teed to the same log).
-  - `bg_tasks()` — all tasks with state (`running`, `exited (code N)`,
-    `killed (timed out)`, `killed`, `orphaned`), runtime, last-activity
+  - `bg_tasks(limit?)` — the session's tasks with state (`running`, `exited
+    (code N)`, `killed (timed out)`, `killed`, `orphaned`), runtime,
+    last-activity
     timestamp and log size. Together with `bg_output` this answers "is it
     still running and what is it doing now" in one call; both tool
     descriptions tell the model it may inspect running tasks at any time,
@@ -156,9 +184,11 @@ Gate on `HERDR_ENV=1` and `herdr` on PATH; silently fall back to layer 1.
   The marker is printed after the pipeline so `wait-output` matches it.
 - Completion: the watcher calls `herdr pane wait-output --regex
   '__BG_EXIT__:<nonce>:[0-9]+'` (bounded by the task timeout + margin), then
-  `herdr pane read` for the tail, then **closes the pane/tab on success** and
-  leaves it open on failure or timeout (renamed via
-  `herdr pane report-metadata --title ...` so it is clearly the failed task).
+  `herdr pane read` for the tail, then **closes the pane/tab** whatever the
+  outcome — the log and the completion message hold the output, and keeping
+  failed tabs open (the original policy) piled them up until agents closed
+  them by hand. `keepOpen` leaves a failed one open instead, renamed via
+  `herdr pane report-metadata --title ...` so it is clearly the failed task.
 - The same completion message is sent either way. If the user closes the tab
   manually mid-run, `process-info`/`wait-output` failure marks the task
   `orphaned` and reports it.
@@ -233,7 +263,10 @@ title), `pi-bg-cmd`, `pi-bg-win`.
    **PASSED 2026-06-07**: success tab auto-closed, failure tab kept with pane
    renamed `bg-2 failed: exited (code 1)`, `bg_kill` closed its tab, output
    captured through `tee` survived tab teardown. `herdr tab close` kills the
-   process tree (verified with a sleep process). Phase-3 findings: (1)
+   process tree (verified with a sleep process). **Update after live use**:
+   failure retention was dropped — failed tabs piled up and agents closed them
+   by hand, so every end now closes the tab (`keepOpen` retains the old
+   failure behavior per task). Phase-3 findings: (1)
    `herdr pane run` admits text without executing it — a shell-readiness
    `echo` probe + `wait-output` gate is required before typing the real line;
    (2) the typed line must be quoted for the pane's own shell (PowerShell
@@ -262,3 +295,9 @@ Pi-session checks on Windows only.
 6. Inspection: `bg_tasks` + `bg_output` (incl. `latest` tail) are the surface
    for an agent that stays awake and pokes at running tasks; Herdr-mode output
    is teed to the same log so inspection is uniform.
+7. Cache warming (2026-10-25): activate on "a task is running" through pi's
+   native cache warmer via the `cache_warming_decision` override. Rejected:
+   model-facing heartbeat messages (every beat is a full turn at cache-read
+   price and grows the transcript) and Herdr agent states as the idle source
+   (pi exposes `isIdle()` natively; the extension stays Herdr-independent).
+   User visibility is a `setStatus` footer heartbeat.

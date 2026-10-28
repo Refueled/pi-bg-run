@@ -20,8 +20,9 @@
 	"pi": {
 		"extensions": ["./src/index.ts"]
 	},
-	"files": ["index.ts", "src", "README.md", "PLAN.md"],
+	"files": ["index.ts", "src", "scripts/ensure-cache-warming.cjs", "README.md", "PLAN.md"],
 	"scripts": {
+		"postinstall": "node scripts/ensure-cache-warming.cjs",
 		"test": "node --test test/*.test.ts"
 	},
 	"peerDependencies": {

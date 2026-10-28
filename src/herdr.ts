@@ -1,8 +1,9 @@
 // The Herdr layer: run a task visibly in a Herdr tab (or a split pane) instead
 // of detached. The typed line invokes the same wrapper script, whose output is
 // teed to the task's log, so `bg_output` and the completion message work the
-// same as detached mode. A tab closes when its task succeeds and stays open,
-// renamed, when it fails. Closing a tab tears down its terminal and kills the
+// same as detached mode. A tab closes when its task ends — the log and the
+// completion message hold its output — with `keepOpen` keeping a failed one,
+// renamed, on screen. Closing a tab tears down its terminal and kills the
 // process tree (verified), so it is also the kill for a tab task; `taskkill`
 // stays the fallback when the CLI cannot be reached.
 //

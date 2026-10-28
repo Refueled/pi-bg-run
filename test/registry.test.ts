@@ -158,6 +158,20 @@ test("endSession kills running tasks silently and stops the poller", async () =>
 	assert.equal(getRegistry().poller, undefined);
 });
 
+test("another session kills and forgets the old tasks and restarts ids at bg-1", async () => {
+	const old = await startTask({ command: "sleep 100" });
+	endSession(); // what session_shutdown does; the map still held the task until now
+	assert.equal(getRegistry().tasks.has(old.id), true);
+	attach(fakePi, "session-other", process.cwd());
+	assert.equal(getRegistry().tasks.has(old.id), false);
+	assert.equal(old.state, "killed");
+	assert.equal(old.reason, "killed by user");
+	assert.equal(completed(old), undefined);
+	// The new conversation's list starts fresh: ids and `bg_tasks` are its own.
+	const fresh = await startTask({ command: "echo fresh" });
+	assert.equal(fresh.id, "bg-1");
+});
+
 test("wrapperScript runs the command in a subshell and appends the marker", () => {
 	const script = wrapperScript("exit 5", "nonceX");
 	assert.ok(script.includes("( eval \"$__pi_bg_run_cmd\" )"));

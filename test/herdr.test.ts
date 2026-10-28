@@ -1,6 +1,7 @@
 // The Herdr layer against a fake Herdr port: the typed line's quoting, the
-// pane wrapper's tee, and the tab lifecycle — success closes the tab, failure
-// keeps it renamed, kill closes it, and a Herdr failure falls back to detached.
+// pane wrapper's tee, and the tab lifecycle — any end closes the tab,
+// `keepOpen` keeps a failed one renamed, kill closes it, and a Herdr failure
+// falls back to detached.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -130,7 +131,7 @@ test("a tab task runs in Herdr and never spawns detached", async () => {
 	assert.deepEqual(created?.args, ["demo", process.cwd()]);
 });
 
-test("a successful tab task closes its tab; a failed one stays renamed", async () => {
+test("a tab task closes its tab on any outcome; keepOpen keeps a failed one renamed", async () => {
 	const ok = await startTask({ command: "true", herdr: "tab" });
 	writeFileSync(ok.logPath, `\n__BG_EXIT__:${ok.nonce}:0\n`);
 	pollOnce();
@@ -138,16 +139,31 @@ test("a successful tab task closes its tab; a failed one stays renamed", async (
 	assert.ok(herdrCalls.some((call) => call.op === "close" && call.args[0] === ok.herdr?.paneId));
 	assert.ok(messages.some((text) => text.includes(ok.id)));
 
+	// A failed tab closes too: its output lives on in the log and the
+	// completion message, so nothing piles up for the agent to clean up.
 	const bad = await startTask({ command: "false", herdr: "tab" });
 	writeFileSync(bad.logPath, `\n__BG_EXIT__:${bad.nonce}:1\n`);
 	pollOnce();
 	assert.equal(bad.state, "exited");
 	assert.equal(bad.exitCode, 1);
-	assert.ok(!herdrCalls.some((call) => call.op === "close" && call.args[0] === bad.herdr?.paneId));
-	const renamed = herdrCalls.find((call) => call.op === "rename" && call.args[0] === bad.herdr?.paneId);
+	assert.ok(herdrCalls.some((call) => call.op === "close" && call.args[0] === bad.herdr?.paneId));
+	assert.ok(!herdrCalls.some((call) => call.op === "rename" && call.args[0] === bad.herdr?.paneId));
+
+	// `keepOpen` is the exception: a failed tab stays, renamed to be found.
+	const kept = await startTask({ command: "false", herdr: "tab", keepOpen: true });
+	writeFileSync(kept.logPath, `\n__BG_EXIT__:${kept.nonce}:1\n`);
+	pollOnce();
+	assert.ok(!herdrCalls.some((call) => call.op === "close" && call.args[0] === kept.herdr?.paneId));
+	const renamed = herdrCalls.find((call) => call.op === "rename" && call.args[0] === kept.herdr?.paneId);
 	assert.ok(renamed !== undefined);
 	assert.ok(renamed.args[1].includes("bg-"));
 	assert.ok(renamed.args[1].includes("exited (code 1)"));
+
+	// keepOpen never keeps a successful tab.
+	const keptOk = await startTask({ command: "true", herdr: "tab", keepOpen: true });
+	writeFileSync(keptOk.logPath, `\n__BG_EXIT__:${keptOk.nonce}:0\n`);
+	pollOnce();
+	assert.ok(herdrCalls.some((call) => call.op === "close" && call.args[0] === keptOk.herdr?.paneId));
 });
 
 test("killing a tab task closes the tab", async () => {

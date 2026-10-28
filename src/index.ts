@@ -13,6 +13,7 @@ import { Type } from "typebox";
 import { killTask, attach, endSession, getRegistry, startTask, type Task } from "./registry.ts";
 import { oneLine, stateData, stateText, taskData, taskLine, type PiLike } from "./notify.ts";
 import { readOutput, taskTail } from "./output.ts";
+import { warmDecision, warmSettled, warmStart, warmStop } from "./warm.ts";
 
 /** What the model is told when a task starts. */
 const COMPLETION_TEXT =
@@ -65,9 +66,31 @@ export default function (pi: ExtensionAPI): void {
 			// a session without an id still gets a log directory
 		}
 		attach(pi as unknown as PiLike, sessionId, ctx.cwd);
+		// Cache-warming mode: the footer heartbeat and the one-time warning use
+		// the session's own context, refreshed at every session start.
+		warmStart(sessionId, {
+			isIdle: () => ctx.isIdle(),
+			setStatus: (key, text) => ctx.ui.setStatus(key, text),
+			notify: (message, type) => ctx.ui.notify(message, type),
+			cacheWarming: () => pi.getSettings().cacheWarming,
+			model: () => ctx.model,
+		});
 	});
 	pi.on("session_shutdown", async () => {
 		endSession();
+		warmStop();
+	});
+	// While a task runs, force pi's idle cache refresh instead of its usual
+	// economics (a 15% continuation estimate declines exactly when an agent
+	// waits on a background task).
+	pi.on("cache_warming_decision", () => {
+		const action = warmDecision(getRegistry().tasks.values());
+		return action === undefined ? {} : { action };
+	});
+	// The agent just settled: if a task runs and the cache cannot be kept warm,
+	// say so once instead of letting the miss happen silently.
+	pi.on("agent_settled", async () => {
+		warmSettled();
 	});
 
 	pi.registerTool({
@@ -79,7 +102,7 @@ export default function (pi: ExtensionAPI): void {
 			"when you have other work to do, or nothing to do until it ends. " +
 			`The command runs in the same shell as \`bash\`; ${COMPLETION_TEXT} ` +
 			"Inside Herdr the task runs visibly in a tab (or a split with `herdr: \"pane\"`); " +
-			"the tab closes when the task succeeds and stays open, renamed, when it fails. " +
+			"the tab closes when the task ends, so nothing is left open; `keepOpen: true` keeps a failed one open, renamed, for inspection. " +
 			"`timeoutSeconds` bounds the task: at the deadline its process tree is killed and the state becomes " +
 			"killed (timed out). Write long output to a file in the command if a log artifact is wanted; " +
 			"`bg_output` reads the captured output regardless.",
@@ -95,6 +118,11 @@ export default function (pi: ExtensionAPI): void {
 					description:
 						"Run visibly in Herdr: 'tab' (the default inside Herdr) makes a new tab named for the task, " +
 						"'pane' splits the current tab, 'none' runs detached.",
+				}),
+			),
+			keepOpen: Type.Optional(
+				Type.Boolean({
+					description: "Keep the Herdr tab or pane open, renamed, when the task ends unsuccessfully; it always closes on success",
 				}),
 			),
 		}),
@@ -168,16 +196,35 @@ export default function (pi: ExtensionAPI): void {
 		name: "bg_tasks",
 		label: "bg_tasks",
 		description:
-			"List every background task of this session with its id, command, state, runtime, " +
-			"and exit code or reason. States: running, exited, killed, exit unknown.",
-		parameters: Type.Object({}),
-		outputSchema: Type.Object({ tasks: Type.Array(Type.Object(TASK_FIELDS)) }),
+			"List this session's background tasks with its id, command, state, runtime, " +
+			"and exit code or reason. Running tasks first, then the most recent; at most `limit` (default 15) are listed. " +
+			"Older tasks are not forgotten: they still answer to `bg_output` and `bg_kill` by id, and a larger `limit` brings them back. " +
+			"Tasks belong to the session that started them, so a new session's list starts empty. " +
+			"States: running, exited, killed, exit unknown.",
+		parameters: Type.Object({
+			limit: Type.Optional(
+				Type.Number({ description: "How many tasks to list: the running ones first, then the newest; default 15" }),
+			),
+		}),
+		outputSchema: Type.Object({
+			tasks: Type.Array(Type.Object(TASK_FIELDS)),
+			not_shown: Type.Number({ description: "Older settled tasks left out of this listing; raise `limit` to include them" }),
+		}),
 		annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-		async execute() {
-			const tasks = [...getRegistry().tasks.values()];
-			const text = tasks.length === 0 ? "No background tasks." : tasks.map(taskLine).join("\n");
+		async execute(_toolCallId, params) {
+			const all = [...getRegistry().tasks.values()].sort(
+				(a, b) => Number(b.state === "running") - Number(a.state === "running") || b.startedAt - a.startedAt,
+			);
+			const limit = Math.min(Math.max(Math.floor(params.limit ?? 15), 1), 100);
+			const tasks = all.slice(0, limit);
+			const notShown = all.length - tasks.length;
+			const text =
+				tasks.length === 0
+					? "No background tasks."
+					: tasks.map(taskLine).join("\n") +
+						(notShown === 0 ? "" : `\n…and ${notShown} older task(s) not shown; pass a larger \`limit\` or address them by id.`);
 			return {
-				structuredContent: { tasks: tasks.map(taskData) },
+				structuredContent: { tasks: tasks.map(taskData), not_shown: notShown },
 				content: [{ type: "text" as const, text }],
 				details: undefined,
 			};
